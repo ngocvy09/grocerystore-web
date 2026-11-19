@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grocery Store - Manager</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">🛒 Manager</div>
+    <div class="header-spacer"></div>
+    <span class="pill" id="who"></span>
+    <button class="header-btn" id="logout">Log out</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="products">Products</button>
+    <button class="tab" data-tab="categories">Categories</button>
+    <button class="tab" data-tab="stock">Stock</button>
+    <button class="tab" data-tab="orders">Orders</button>
+    <button class="tab" data-tab="report">Sales report</button>
+  </nav>
+
+  <main class="page" id="content"></main>
+
+  <script src="js/api.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/manager.js"></script>
+</body>
+</html>

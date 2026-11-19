@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grocery Store - Deliveries</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">🚚 Deliveries</div>
+    <div class="header-spacer"></div>
+    <span class="pill" id="who"></span>
+    <button class="header-btn" id="logout">Log out</button>
+  </header>
+
+  <main class="page">
+    <div class="two-col">
+      <div>
+        <div class="section-title">Assigned orders</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Status</th></tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <p class="legend">Orange = being delivered · Green = delivered</p>
+      </div>
+
+      <aside class="card" id="details">
+        <div class="section-title">Order details</div>
+        <div class="muted">Select an order to see its details.</div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/deliveryman.js"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grocery Store - Log in</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand">🛒 Grocery Store</div>
+    <p class="muted center" id="subtitle">Log in to continue</p>
+
+    <!-- LOGIN FORM -->
+    <form id="login-form">
+      <div class="field">
+        <label for="l-user">Username</label>
+        <input id="l-user">
+      </div>
+      <div class="field">
+        <label for="l-pass">Password</label>
+        <input id="l-pass" type="password">
+      </div>
+      <div class="error-text" id="l-error"></div>
+      <button class="btn primary block" type="submit">Log in</button>
+      <button class="btn secondary block" type="button" id="to-register">Create customer account</button>
+    </form>
+
+    <!-- REGISTER FORM (hidden until the user clicks "Create customer account") -->
+    <form id="register-form" class="hidden">
+      <div class="field"><label for="r-name">Full name</label><input id="r-name"></div>
+      <div class="field"><label for="r-phone">Phone (9-11 digits)</label><input id="r-phone"></div>
+      <div class="field"><label for="r-address">Delivery address</label><input id="r-address"></div>
+      <div class="field"><label for="r-user">Username</label><input id="r-user"></div>
+      <div class="field"><label for="r-pass">Password (at least 4 characters)</label><input id="r-pass" type="password"></div>
+      <div class="field"><label for="r-confirm">Confirm password</label><input id="r-confirm" type="password"></div>
+      <div class="error-text" id="r-error"></div>
+      <button class="btn primary block" type="submit">Register</button>
+      <button class="btn secondary block" type="button" id="to-login">Back to log in</button>
+    </form>
+
+    <p class="muted hint">Demo accounts: customer / manager / deliveryman, password 1</p>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>
