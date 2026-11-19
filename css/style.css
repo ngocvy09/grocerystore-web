@@ -221,3 +221,25 @@ tr.row-soon { background: #ffe0b2 !important; }
 .bar-track { flex: 1; background: #eceff1; border-radius: 8px; height: 16px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 8px; }
 .bar-count { width: 36px; text-align: right; font-weight: 600; }
+.modal p { white-space: pre-line; }
+/* ---------- sales report and printing ---------- */
+.bar-count.wide { width: 90px; }
+.print-only { display: none; }
+.report-title { font-size: 22px; font-weight: 700; color: var(--brand-dark); margin-bottom: 4px; }
+.report-head { border-bottom: 2px solid var(--brand); padding-bottom: 10px; line-height: 1.6; }
+
+@page { size: A4; margin: 14mm; }
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: #fff; font-size: 12px; }
+  .app-header, .tabs, .no-print, .toasts, .overlay { display: none !important; }
+  .print-only { display: block; }
+  .page { max-width: none; padding: 0; }
+  .card, .stat, .table-wrap { box-shadow: none; border: 1px solid #cfd8dc; }
+  .stats { gap: 10px; }
+  .stat { min-width: 0; padding: 10px 14px; }
+  .stat-value { font-size: 20px; }
+  .card, .stat, tr, .bar-row { break-inside: avoid; }
+  th { background: #12722b !important; color: #fff !important; }
+  tbody tr:nth-child(even) { background: #f5f7f5; }
+}

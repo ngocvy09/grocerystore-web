@@ -1,15 +1,29 @@
 /*
- * api.js - the DATA LAYER of the website.
- * Pages only call UserDAO, ProductDAO and OrderDAO (like the Java classes in the report).
- * For now the data lives in the browser (localStorage). Later your teammates'
- * Java backend can replace the inside of each function with a fetch() call.
+ * api.js - the DATA LAYER of the website (the "DAO" tier).
+ *
+ * It mirrors the MySQL database (schema.sql / seed.sql) table by table:
+ *   users, categories, products, inventory_batches, orders, order_items
+ * with the same column names, the same ENUM values (CUSTOMER / MANAGER / DELIVERYMAN,
+ * PENDING / BEING_DELIVERED / DELIVERED) and the same rules (unique username and phone,
+ * a category with products cannot be deleted, a product that is in an order cannot be
+ * deleted, one inventory row per product, ...).
+ *
+ * The pages never see the raw tables. They call UserDAO, ProductDAO and OrderDAO, which
+ * return the plain objects ("DTOs") described above each DAO. When the Java backend is
+ * ready, keep the same function names and the same returned objects, and replace the
+ * inside of each function with fetch('/api/...'). No page has to change.
+ *
+ * DEMO ONLY: the real database stores a bcrypt hash in users.password and the Java code
+ * checks it with bcrypt. The browser demo keeps the plain text here instead.
  */
 (function (global) {
   'use strict';
 
-  const KEY = 'grocerystore_db_v1';
-  const STATUS = { PENDING: 'Pending', ACTIVE: 'Being Delivered', DONE: 'Delivered' };
+  const KEY = 'grocerystore_db_v2';
+  const STATUS = { PENDING: 'PENDING', BEING_DELIVERED: 'BEING_DELIVERED', DELIVERED: 'DELIVERED' };
+  const FLOW = [STATUS.PENDING, STATUS.BEING_DELIVERED, STATUS.DELIVERED];
 
+  // Java: InsufficientStockException
   class InsufficientStockError extends Error {
     constructor(productName, available) {
       super('Not enough stock for ' + productName + '. Available: ' + available);
@@ -18,58 +32,75 @@
     }
   }
 
+  // ---------- helpers ----------
   const pad = n => String(n).padStart(2, '0');
-  const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  const inDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+  const dateStr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const dateTimeStr = d => dateStr(d) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  const todayStr = () => dateStr(new Date());
+  const daysFromNow = n => { if (n === null) return null; const d = new Date(); d.setDate(d.getDate() + n); return dateStr(d); };
+  const timeFromNow = ms => dateTimeStr(new Date(Date.now() + ms));
+  const HOUR = 3600000, DAY = 86400000;
+  const round2 = x => Math.round(x * 100) / 100;
   const copy = x => JSON.parse(JSON.stringify(x));
+  const take = (db, key) => db.next[key]++;                 // like AUTO_INCREMENT
 
-  // ---------- starting data ----------
+  // ---------- starting data (same as seed.sql) ----------
   function seed() {
+    const PW = 'Password123!';
+    const user = (id, name, username, phone, role, address, staff) =>
+      ({ user_id: id, name, username, phone_number: phone, password: PW, role, address, staff_id: staff, active: true });
+
+    const categories = [
+      [1, 'Dairy', 'Milk, cheese and yogurt'],
+      [2, 'Bakery', 'Fresh bread and pastries'],
+      [3, 'Fruit & Vegetables', 'Fresh produce'],
+      [4, 'Beverages', 'Juice and water'],
+      [5, 'Pantry', 'Dry and canned goods']
+    ].map(c => ({ category_id: c[0], category_name: c[1], description: c[2] }));
+
+    // [id, name, price, expires in N days (null = never), category_id]
     const products = [
-      [1, 'Bread', 'Bakery', 25000, 22, 10, 3, 5],
-      [2, 'Milk', 'Dairy', 32000, 5, 10, 20, 2],
-      [3, 'Eggs (10)', 'Dairy', 38000, 15, 10, 25, 10],
-      [4, 'Rice 5kg', 'Dry goods', 120000, 8, 10, 200, 7],
-      [5, 'Apple', 'Fruit', 45000, 30, 10, 6, 4],
-      [6, 'Tomato', 'Vegetables', 28000, 40, 10, 5, 6],
-      [7, 'Orange juice', 'Drinks', 35000, 25, 10, 60, 8],
-      [8, 'Instant noodles', 'Dry goods', 6000, 60, 20, 180, 12],
-      [9, 'Banana', 'Fruit', 22000, 18, 10, 4, 3]
-    ].map(p => ({
-      id: p[0], name: p[1], category: p[2], price: p[3], quantity: p[4], minStock: p[5],
-      expirationDate: inDays(p[6]), restockDate: inDays(p[7])
+      [1, 'Fresh Milk 1L', 1.80, 4, 1], [2, 'Yogurt 4-pack', 2.40, 10, 1],
+      [3, 'Cheddar Cheese 200g', 3.50, 40, 1], [4, 'Cream 250ml', 1.90, -2, 1],
+      [5, 'White Bread', 1.50, 2, 2], [6, 'Croissant', 1.20, 1, 2],
+      [7, 'Apples 1kg', 2.90, 9, 3], [8, 'Bananas 1kg', 1.60, 5, 3],
+      [9, 'Orange Juice 1L', 2.50, 60, 4], [10, 'Mineral Water 1.5L', 0.80, 365, 4],
+      [11, 'Rice 5kg', 8.90, 500, 5], [12, 'Pasta 500g', 1.40, 400, 5],
+      [13, 'Canned Tomatoes', 1.10, 700, 5], [14, 'Sea Salt 500g', 0.90, null, 5]
+    ].map(p => ({ product_id: p[0], product_name: p[1], price: p[2], expiration_date: daysFromNow(p[3]), category_id: p[4] }));
+
+    // [product_id, quantity, low_stock_threshold, restocked N days ago (null = never)]
+    const batches = [
+      [1, 6, 10, 3], [2, 40, 10, 6], [3, 25, 10, 12], [4, 8, 10, 15], [5, 30, 10, 1],
+      [6, 4, 10, 1], [7, 50, 10, 5], [8, 35, 10, 5], [9, 60, 10, 20], [10, 120, 20, 30],
+      [11, 0, 5, 45], [12, 80, 10, 25], [13, 70, 10, 25], [14, 45, 10, null]
+    ].map((b, i) => ({
+      batch_id: i + 1, product_id: b[0], quantity: b[1], low_stock_threshold: b[2],
+      restock_date: b[3] === null ? null : daysFromNow(-b[3])
     }));
-    const byId = id => products.find(p => p.id === id);
-    const mkOrder = (id, customerName, username, address, lines, status, daysAgo) => {
-      const items = lines.map(l => ({ productId: l[0], name: byId(l[0]).name, price: byId(l[0]).price, qty: l[1] }));
-      return {
-        id, customerName, username, address, items, status,
-        total: items.reduce((s, i) => s + i.price * i.qty, 0),
-        date: inDays(-daysAgo)
-      };
-    };
+
     return {
       users: [
-        { username: 'customer', password: '1', role: 'Customer', name: 'Demo Customer', phone: '0901234567', address: '28 Le Loi Street, District 1' },
-        { username: 'manager', password: '1', role: 'Manager', name: 'An', phone: '0901234567' },
-        { username: 'deliveryman', password: '1', role: 'Deliveryman', name: 'Ben', phone: '0905678901' }
+        user(1, 'Jordan Ellis', 'manager1', '0901000001', 'MANAGER', null, 'S001'),
+        user(2, 'Casey Brooks', 'delivery1', '0901000002', 'DELIVERYMAN', null, 'S002'),
+        user(3, 'Jamie Carter', 'jamie', '0902000001', 'CUSTOMER', '12 Example Street, District 1', null),
+        user(4, 'Riley Morgan', 'riley', '0902000002', 'CUSTOMER', '45 Sample Avenue, District 3', null)
       ],
-      categories: [
-        { name: 'Bakery', description: 'Bread, cakes and pastries' },
-        { name: 'Dairy', description: 'Milk, eggs and cheese' },
-        { name: 'Dry goods', description: 'Rice, noodles and pantry items' },
-        { name: 'Fruit', description: 'Fresh fruit' },
-        { name: 'Vegetables', description: 'Fresh vegetables' },
-        { name: 'Drinks', description: 'Juice, water and soft drinks' }
-      ],
-      products,
+      categories, products, inventory_batches: batches,
       orders: [
-        mkOrder('CA010203', 'Alice', 'customer', '28 Le Loi Street', [[1, 2], [2, 1]], STATUS.DONE, 3),
-        mkOrder('CA010204', 'Binh', 'binh', '15 Nguyen Hue Street', [[4, 1], [3, 2]], STATUS.PENDING, 0),
-        mkOrder('CA010205', 'Chau', 'chau', '102 Tran Hung Dao Street', [[5, 3]], STATUS.ACTIVE, 0)
+        { order_id: 1, customer_id: 3, order_date: timeFromNow(-3 * DAY), status: 'DELIVERED', total_amount: 5.10, delivery_address: '12 Example Street, District 1', deliveryman_id: 2 },
+        { order_id: 2, customer_id: 4, order_date: timeFromNow(-2 * HOUR), status: 'PENDING', total_amount: 8.30, delivery_address: '45 Sample Avenue, District 3', deliveryman_id: null },
+        { order_id: 3, customer_id: 3, order_date: timeFromNow(-1 * DAY), status: 'BEING_DELIVERED', total_amount: 6.10, delivery_address: '12 Example Street, District 1', deliveryman_id: 2 }
       ],
-      nextProductId: 10,
-      orderCounter: 10205
+      order_items: [
+        { order_id: 1, product_id: 1, quantity: 2, unit_price: 1.80 },
+        { order_id: 1, product_id: 5, quantity: 1, unit_price: 1.50 },
+        { order_id: 2, product_id: 7, quantity: 2, unit_price: 2.90 },
+        { order_id: 2, product_id: 9, quantity: 1, unit_price: 2.50 },
+        { order_id: 3, product_id: 12, quantity: 2, unit_price: 1.40 },
+        { order_id: 3, product_id: 13, quantity: 3, unit_price: 1.10 }
+      ],
+      next: { user_id: 5, category_id: 6, product_id: 15, batch_id: 15, order_id: 4 }
     };
   }
 
@@ -83,109 +114,208 @@
     try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* ignore */ }
   }
 
-  // ---------- UserDAO ----------
+  // ---------- table rows -> objects the pages use ----------
+  function userDTO(u) {
+    return { id: u.user_id, name: u.name, username: u.username, phone: u.phone_number,
+             role: u.role, address: u.address, staffId: u.staff_id };
+  }
+  // product + its category name + its inventory_batches row
+  function productDTO(db, p) {
+    const cat = db.categories.find(c => c.category_id === p.category_id);
+    const b = db.inventory_batches.find(x => x.product_id === p.product_id);
+    return {
+      id: p.product_id, name: p.product_name, price: p.price,
+      expirationDate: p.expiration_date,                       // null = does not expire
+      categoryId: p.category_id, category: cat ? cat.category_name : '',
+      quantity: b ? b.quantity : 0,
+      lowStockThreshold: b ? b.low_stock_threshold : 10,
+      restockDate: b ? b.restock_date : null                   // last restock
+    };
+  }
+  // order + customer name + deliveryman name + its order_items
+  function orderDTO(db, o) {
+    const cust = db.users.find(u => u.user_id === o.customer_id);
+    const dm = db.users.find(u => u.user_id === o.deliveryman_id);
+    const items = db.order_items.filter(i => i.order_id === o.order_id).map(i => {
+      const p = db.products.find(x => x.product_id === i.product_id);
+      return { productId: i.product_id, name: p ? p.product_name : '(deleted product)', qty: i.quantity, unitPrice: i.unit_price };
+    });
+    return {
+      id: o.order_id, customerId: o.customer_id, customerName: cust ? cust.name : '',
+      date: o.order_date.slice(0, 10), dateTime: o.order_date,
+      status: o.status, total: o.total_amount, address: o.delivery_address,
+      deliverymanId: o.deliveryman_id, deliverymanName: dm ? dm.name : null, items
+    };
+  }
+  const newestFirst = (a, b) => (a.dateTime < b.dateTime ? 1 : a.dateTime > b.dateTime ? -1 : b.id - a.id);
+
+  // =====================================================================
+  // UserDAO      returns { id, name, username, phone, role, address, staffId }
+  // =====================================================================
   const UserDAO = {
+    // returns the user, or null when username/password are wrong
     async authenticate(username, password) {
-      const u = read().users.find(x => x.username === String(username).toLowerCase());
+      const u = read().users.find(x => x.username.toLowerCase() === String(username).trim().toLowerCase());
       if (!u || u.password !== password) return null;
-      const out = copy(u); delete out.password; return out;
+      if (!u.active) throw new Error('This account has been disabled.');
+      return userDTO(u);
     },
-    async insert(user) {
+    // register a new CUSTOMER: { name, phone, address, username, password }
+    async insert(c) {
       const db = read();
-      const username = String(user.username).toLowerCase();
-      if (db.users.some(u => u.username === username)) throw new Error('That username is already taken.');
-      db.users.push(Object.assign({}, user, { username, role: 'Customer' }));
+      const username = String(c.username).trim();
+      if (db.users.some(u => u.username.toLowerCase() === username.toLowerCase()))
+        throw new Error('That username is already taken.');
+      if (db.users.some(u => u.phone_number === c.phone))
+        throw new Error('That phone number is already registered.');
+      db.users.push({
+        user_id: take(db, 'user_id'), name: c.name, username, phone_number: c.phone,
+        password: c.password, role: 'CUSTOMER', address: c.address, staff_id: null, active: true
+      });
       write(db);
-    },
-    async update(user) {
-      const db = read();
-      const i = db.users.findIndex(u => u.username === user.username);
-      if (i >= 0) { db.users[i] = Object.assign(db.users[i], user); write(db); }
     }
   };
 
-  // ---------- ProductDAO ----------
+  // =====================================================================
+  // ProductDAO   returns { id, name, price, expirationDate, categoryId, category,
+  //                        quantity, lowStockThreshold, restockDate }
+  // =====================================================================
   const ProductDAO = {
-    async findAll() { return copy(read().products); },
+    async findAll() { const db = read(); return db.products.map(p => productDTO(db, p)); },
     async search(keyword) {
       const k = String(keyword || '').toLowerCase().trim();
-      return copy(read().products.filter(p => p.name.toLowerCase().includes(k)));
+      const db = read();
+      return db.products.filter(p => p.product_name.toLowerCase().includes(k)).map(p => productDTO(db, p));
     },
+    // p = { name, price, categoryId, expirationDate|null, quantity, lowStockThreshold }
+    // creates the product AND its single inventory_batches row
     async insert(p) {
       const db = read();
-      const product = Object.assign({ minStock: 10 }, p, { id: db.nextProductId++ });
-      db.products.push(product); write(db); return copy(product);
+      const id = take(db, 'product_id');
+      db.products.push({ product_id: id, product_name: p.name, price: p.price,
+                         expiration_date: p.expirationDate || null, category_id: p.categoryId });
+      db.inventory_batches.push({ batch_id: take(db, 'batch_id'), product_id: id, quantity: p.quantity,
+                                  low_stock_threshold: p.lowStockThreshold, restock_date: todayStr() });
+      write(db);
+      return productDTO(db, db.products[db.products.length - 1]);
     },
+    // p = same fields plus id
     async update(p) {
       const db = read();
-      const i = db.products.findIndex(x => x.id === p.id);
-      if (i >= 0) { Object.assign(db.products[i], p); write(db); }
-    },
-    async delete(id) {
-      const db = read();
-      db.products = db.products.filter(p => p.id !== id); write(db);
-    },
-    async updateStock(id, quantity) {
-      const db = read();
-      const p = db.products.find(x => x.id === id);
-      if (p) { p.quantity = quantity; write(db); }
-    },
-    async restock(id, addQuantity, restockDate) {
-      const db = read();
-      const p = db.products.find(x => x.id === id);
-      if (!p) return;
-      p.quantity += addQuantity;
-      if (restockDate) p.restockDate = restockDate;
+      const row = db.products.find(x => x.product_id === p.id);
+      const batch = db.inventory_batches.find(x => x.product_id === p.id);
+      if (!row) throw new Error('Product not found.');
+      row.product_name = p.name; row.price = p.price;
+      row.category_id = p.categoryId; row.expiration_date = p.expirationDate || null;
+      if (batch) { batch.quantity = p.quantity; batch.low_stock_threshold = p.lowStockThreshold; }
       write(db);
     },
-    async findCategories() { return copy(read().categories); },
+    // FK rule: a product that appears in an order cannot be deleted (RESTRICT).
+    // Its inventory_batches row is deleted with it (CASCADE).
+    async delete(id) {
+      const db = read();
+      const p = db.products.find(x => x.product_id === id);
+      const used = new Set(db.order_items.filter(i => i.product_id === id).map(i => i.order_id)).size;
+      if (used > 0) throw new Error('Cannot delete "' + (p ? p.product_name : '') + '": it appears in ' + used + ' order(s).');
+      db.products = db.products.filter(x => x.product_id !== id);
+      db.inventory_batches = db.inventory_batches.filter(x => x.product_id !== id);
+      write(db);
+    },
+    // Manager.restock(): add units and record today as the restock date
+    async restock(id, addQuantity) {
+      const db = read();
+      const b = db.inventory_batches.find(x => x.product_id === id);
+      if (!b) throw new Error('Product not found.');
+      b.quantity += addQuantity;
+      b.restock_date = todayStr();
+      write(db);
+    },
+
+    // ----- categories: { id, name, description } -----
+    async findCategories() {
+      return read().categories.map(c => ({ id: c.category_id, name: c.category_name, description: c.description || '' }));
+    },
     async insertCategory(c) {
       const db = read();
-      if (db.categories.some(x => x.name.toLowerCase() === c.name.toLowerCase()))
+      if (db.categories.some(x => x.category_name.toLowerCase() === c.name.toLowerCase()))
         throw new Error('That category already exists.');
-      db.categories.push({ name: c.name, description: c.description || '' }); write(db);
+      db.categories.push({ category_id: take(db, 'category_id'), category_name: c.name, description: c.description || null });
+      write(db);
     },
-    async deleteCategory(name) {
+    // FK rule: a category that still has products cannot be deleted (RESTRICT)
+    async deleteCategory(id) {
       const db = read();
-      const used = db.products.filter(p => p.category === name).length;
-      if (used > 0) throw new Error('Cannot delete "' + name + '": ' + used + ' product(s) still use it.');
-      db.categories = db.categories.filter(c => c.name !== name); write(db);
+      const cat = db.categories.find(c => c.category_id === id);
+      const used = db.products.filter(p => p.category_id === id).length;
+      if (used > 0) throw new Error('Cannot delete "' + (cat ? cat.category_name : '') + '": ' + used + ' product(s) still use it.');
+      db.categories = db.categories.filter(c => c.category_id !== id);
+      write(db);
     }
   };
 
-  // ---------- OrderDAO ----------
+  // =====================================================================
+  // OrderDAO     returns { id, customerId, customerName, date, dateTime, status, total,
+  //                        address, deliverymanId, deliverymanName,
+  //                        items: [{ productId, name, qty, unitPrice }] }
+  // =====================================================================
   const OrderDAO = {
+    // order = { customerId, items: [{ productId, qty }] }
+    // The delivery address is COPIED from the customer, unit_price is the price today.
+    // Throws InsufficientStockError when stock is too low (then nothing is saved).
     async createOrder(order) {
       const db = read();
+      const customer = db.users.find(u => u.user_id === order.customerId && u.role === 'CUSTOMER');
+      if (!customer) throw new Error('Customer not found.');
+      if (!order.items.length) throw new Error('The order has no items.');
+
       const lines = order.items.map(it => {
-        const p = db.products.find(x => x.id === it.productId);
+        const p = db.products.find(x => x.product_id === it.productId);
         if (!p) throw new Error('That product no longer exists.');
-        if (it.qty > p.quantity) throw new InsufficientStockError(p.name, p.quantity);
-        return { p, qty: it.qty };
+        if (p.expiration_date && p.expiration_date < todayStr())
+          throw new Error(p.product_name + ' is expired and cannot be ordered.');
+        const b = db.inventory_batches.find(x => x.product_id === p.product_id);
+        const available = b ? b.quantity : 0;
+        if (it.qty > available) throw new InsufficientStockError(p.product_name, available);
+        return { p, b, qty: it.qty };
       });
-      lines.forEach(l => { l.p.quantity -= l.qty; });
-      db.orderCounter += 1;
-      const items = lines.map(l => ({ productId: l.p.id, name: l.p.name, price: l.p.price, qty: l.qty }));
-      const created = {
-        id: 'CA' + String(db.orderCounter).padStart(6, '0'),
-        customerName: order.customerName, username: order.username, address: order.address,
-        items, total: items.reduce((s, i) => s + i.price * i.qty, 0),
-        status: STATUS.PENDING, date: iso(new Date())
-      };
-      db.orders.unshift(created);
+
+      lines.forEach(l => { l.b.quantity -= l.qty; });
+      const id = take(db, 'order_id');
+      const total = round2(lines.reduce((s, l) => s + l.p.price * l.qty, 0));
+      db.orders.push({
+        order_id: id, customer_id: customer.user_id, order_date: dateTimeStr(new Date()),
+        status: STATUS.PENDING, total_amount: total, delivery_address: customer.address, deliveryman_id: null
+      });
+      lines.forEach(l => db.order_items.push({ order_id: id, product_id: l.p.product_id, quantity: l.qty, unit_price: l.p.price }));
       write(db);
-      return copy(created);
+      return orderDTO(db, db.orders[db.orders.length - 1]);
     },
-    async findAll() { return copy(read().orders); },
-    async findByCustomer(username) { return copy(read().orders.filter(o => o.username === username)); },
-    async updateStatus(id, newStatus) {
+    async findAll() { const db = read(); return db.orders.map(o => orderDTO(db, o)).sort(newestFirst); },
+    async findByCustomer(customerId) {
       const db = read();
-      const o = db.orders.find(x => x.id === id);
-      if (!o) return;
-      const order = [STATUS.PENDING, STATUS.ACTIVE, STATUS.DONE];
-      if (order.indexOf(newStatus) !== order.indexOf(o.status) + 1)
+      return db.orders.filter(o => o.customer_id === customerId).map(o => orderDTO(db, o)).sort(newestFirst);
+    },
+    // a deliveryman sees the orders nobody has taken yet (PENDING) and his own orders
+    async findForDeliveryman(deliverymanId) {
+      const db = read();
+      return db.orders.filter(o => o.status === STATUS.PENDING || o.deliveryman_id === deliverymanId)
+        .map(o => orderDTO(db, o)).sort(newestFirst);
+    },
+    // PENDING -> BEING_DELIVERED (sets deliveryman_id) -> DELIVERED (same deliveryman only)
+    async updateStatus(orderId, newStatus, deliverymanId) {
+      const db = read();
+      const o = db.orders.find(x => x.order_id === orderId);
+      if (!o) throw new Error('Order not found.');
+      if (FLOW.indexOf(newStatus) !== FLOW.indexOf(o.status) + 1)
         throw new Error('An order must go Pending > Being Delivered > Delivered.');
-      o.status = newStatus; write(db);
+      if (newStatus === STATUS.BEING_DELIVERED) {
+        if (!deliverymanId) throw new Error('A deliveryman is needed to start a delivery.');
+        o.deliveryman_id = deliverymanId;
+      } else if (newStatus === STATUS.DELIVERED && o.deliveryman_id !== deliverymanId) {
+        throw new Error('This order is being delivered by another deliveryman.');
+      }
+      o.status = newStatus;
+      write(db);
     }
   };
 

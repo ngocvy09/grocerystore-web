@@ -1,9 +1,9 @@
 'use strict';
 
-const me = requireRole('Customer');
+const me = requireRole('CUSTOMER');
 let products = [];
 let categories = [];
-let category = 'All';
+let category = 'all';       // 'all' or a category id (as text)
 let keyword = '';
 const cart = new Map();     // productId -> quantity
 
@@ -22,7 +22,8 @@ async function init() {
 
 // load fresh data from the data layer, then redraw everything
 async function reload() {
-  products = await DAO.ProductDAO.findAll();
+  const all = await DAO.ProductDAO.findAll();
+  products = all.filter(p => daysUntil(p.expirationDate) >= 0);   // expired products are not sold
   categories = await DAO.ProductDAO.findCategories();
   renderChips();
   renderGrid();
@@ -39,9 +40,9 @@ function switchView(view) {
 
 // ---------- chips and product cards ----------
 function renderChips() {
-  const names = ['All'].concat(categories.map(c => c.name));
-  $('#chips').innerHTML = names.map(n =>
-    '<button class="chip' + (n === category ? ' selected' : '') + '" data-c="' + esc(n) + '">' + esc(n) + '</button>'
+  const chips = [{ id: 'all', name: 'All' }].concat(categories.map(c => ({ id: String(c.id), name: c.name })));
+  $('#chips').innerHTML = chips.map(c =>
+    '<button class="chip' + (c.id === category ? ' selected' : '') + '" data-c="' + esc(c.id) + '">' + esc(c.name) + '</button>'
   ).join('');
   $$('#chips .chip').forEach(b => b.onclick = () => {
     category = b.dataset.c;
@@ -52,13 +53,13 @@ function renderChips() {
 
 function stockText(p) {
   if (p.quantity <= 0) return '<span class="stock-out">Out of stock</span>';
-  if (p.quantity <= p.minStock) return '<span class="stock-low">Only ' + p.quantity + ' left</span>';
+  if (p.quantity <= p.lowStockThreshold) return '<span class="stock-low">Only ' + p.quantity + ' left</span>';
   return '<span class="stock-ok">In stock: ' + p.quantity + '</span>';
 }
 
 function renderGrid() {
   const list = products.filter(p =>
-    (category === 'All' || p.category === category) &&
+    (category === 'all' || String(p.categoryId) === category) &&
     p.name.toLowerCase().includes(keyword));
 
   if (!list.length) {
@@ -92,13 +93,18 @@ function addToCart(id, delta) {
   renderCart();
 }
 
+function cartTotal() {
+  let total = 0;
+  cart.forEach((qty, id) => { const p = products.find(x => x.id === id); if (p) total += p.price * qty; });
+  return Math.round(total * 100) / 100;
+}
+
 function renderCart() {
-  let total = 0, count = 0;
+  let count = 0;
   const rows = [];
   cart.forEach((qty, id) => {
     const p = products.find(x => x.id === id);
     if (!p) { cart.delete(id); return; }
-    total += p.price * qty;
     count += qty;
     rows.push(
       '<div class="cart-row"><div class="info">' +
@@ -110,7 +116,7 @@ function renderCart() {
         '</div></div>');
   });
   $('#cart-rows').innerHTML = rows.length ? rows.join('') : '<div class="muted">Your cart is empty.</div>';
-  $('#total').textContent = money(total);
+  $('#total').textContent = money(cartTotal());
   $('#cart-pill').textContent = '🧺 ' + count;
   $$('#cart-rows [data-id]').forEach(b =>
     b.onclick = () => addToCart(Number(b.dataset.id), Number(b.dataset.d)));
@@ -119,21 +125,18 @@ function renderCart() {
 // ---------- place order ----------
 async function placeOrder() {
   if (!cart.size) { toast('Your cart is empty.', 'warn'); return; }
-  let total = 0;
-  cart.forEach((qty, id) => { total += products.find(p => p.id === id).price * qty; });
-
-  const ok = await confirmDialog('Place this order? Total: ' + money(total), 'Confirm order', 'Place order');
+  const ok = await confirmDialog(
+    'Place this order? Total: ' + money(cartTotal()) + '\nDelivery address: ' + (me.address || '-'),
+    'Confirm order', 'Place order');
   if (!ok) return;
   try {
     const order = await DAO.OrderDAO.createOrder({
-      username: me.username,
-      customerName: me.name,
-      address: me.address || 'No address',
+      customerId: me.id,
       items: Array.from(cart).map(([productId, qty]) => ({ productId, qty }))
     });
     cart.clear();
     await reload();                      // stock numbers have changed
-    toast('Order ' + order.id + ' placed.', 'success');
+    toast('Order ' + orderCode(order.id) + ' placed.', 'success');
     switchView('orders');
   } catch (e) {
     toast(e.message, 'error');
@@ -143,11 +146,13 @@ async function placeOrder() {
 
 // ---------- My orders ----------
 async function renderOrders() {
-  const orders = await DAO.OrderDAO.findByCustomer(me.username);
+  const orders = await DAO.OrderDAO.findByCustomer(me.id);
   $('#orders').innerHTML = orders.length ? orders.map(o =>
     '<div class="card order-card">' +
-      '<div class="order-head"><div><b>' + esc(o.id) + '</b> <span class="muted">· ' + esc(o.date) + '</span></div>' + statusBadge(o.status) + '</div>' +
+      '<div class="order-head"><div><b>' + esc(orderCode(o.id)) + '</b> <span class="muted">· ' + esc(o.date) + '</span></div>' + statusBadge(o.status) + '</div>' +
       '<ul class="order-items">' + o.items.map(i => '<li>' + esc(i.name) + ' × ' + i.qty + '</li>').join('') + '</ul>' +
+      '<div class="muted" style="margin-top:8px">Deliver to: ' + esc(o.address) +
+        (o.deliverymanName ? ' · Deliveryman: ' + esc(o.deliverymanName) : '') + '</div>' +
       '<div class="total-row"><span class="muted">Total</span><span class="price">' + money(o.total) + '</span></div>' +
       steps(o.status) +
     '</div>'

@@ -9,14 +9,19 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-const money = n => new Intl.NumberFormat('vi-VN').format(Math.round(n)) + ' ₫';
+// prices in the database are DECIMAL(10,2). Change 'USD' here to change the currency everywhere.
+const moneyFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const money = n => moneyFormat.format(n);
+
+// order ids are numbers in the database; show them like CA000001
+const orderCode = id => 'CA' + String(id).padStart(6, '0');
 
 // ---------- session (who is logged in) ----------
 function getSession() {
   try { return JSON.parse(sessionStorage.getItem('session')); } catch (e) { return null; }
 }
 function setSession(user) { sessionStorage.setItem('session', JSON.stringify(user)); }
-// if the wrong person (or nobody) is logged in, send them back to the login page
+// role is 'CUSTOMER', 'MANAGER' or 'DELIVERYMAN'
 function requireRole(role) {
   const s = getSession();
   if (!s || s.role !== role) { location.href = 'index.html'; return null; }
@@ -75,18 +80,23 @@ const confirmDialog = (message, title, okLabel) => dialog({
   buttons: [{ label: 'Cancel', value: false }, { label: okLabel || 'OK', value: true, primary: true }]
 }).then(v => v === true);
 
-// ---------- small renderers ----------
+// ---------- order status (database values -> words and colours) ----------
+const STATUS_FLOW = ['PENDING', 'BEING_DELIVERED', 'DELIVERED'];
+const STATUS_LABEL = { PENDING: 'Pending', BEING_DELIVERED: 'Being Delivered', DELIVERED: 'Delivered' };
+const statusLabel = s => STATUS_LABEL[s] || s;
+
 function statusBadge(status) {
-  const cls = status === 'Delivered' ? 'done' : status === 'Being Delivered' ? 'active' : 'pending';
-  return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
+  const cls = status === 'DELIVERED' ? 'done' : status === 'BEING_DELIVERED' ? 'active' : 'pending';
+  return '<span class="badge ' + cls + '">' + esc(statusLabel(status)) + '</span>';
 }
 function steps(status) {
-  const list = ['Pending', 'Being Delivered', 'Delivered'];
-  const current = list.indexOf(status);
-  return '<div class="steps">' + list.map((s, i) =>
-    '<span class="step' + (i <= current ? ' reached' : '') + '">' + (i <= current ? '● ' : '○ ') + s + '</span>'
+  const current = STATUS_FLOW.indexOf(status);
+  return '<div class="steps">' + STATUS_FLOW.map((s, i) =>
+    '<span class="step' + (i <= current ? ' reached' : '') + '">' + (i <= current ? '● ' : '○ ') + statusLabel(s) + '</span>'
   ).join('<span class="step-arrow">›</span>') + '</div>';
 }
+
+// ---------- dates and stock ----------
 // the same category always gets the same colour
 function categoryColor(name) {
   let h = 0;
@@ -97,7 +107,17 @@ function today() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
+// days from today until a date. A product that never expires (null) gives Infinity.
 function daysUntil(isoDate) {
+  if (!isoDate) return Infinity;
   const a = new Date(today() + 'T00:00:00'), b = new Date(isoDate + 'T00:00:00');
   return Math.round((b - a) / 86400000);
+}
+// 'expired' | 'low' | 'soon' | 'ok'  (used by the manager's Stock tab)
+function stockState(p) {
+  const d = daysUntil(p.expirationDate);
+  if (d < 0) return 'expired';
+  if (p.quantity <= p.lowStockThreshold) return 'low';
+  if (d <= 7) return 'soon';
+  return 'ok';
 }
