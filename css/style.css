@@ -253,3 +253,4 @@ tr.row-soon { background: #ffe0b2 !important; }
 }
 .pill { display: inline-flex; align-items: center; }
 .nav-item { display: inline-flex; align-items: center; }
+.search { margin-right: auto; }
