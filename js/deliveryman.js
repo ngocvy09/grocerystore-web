@@ -6,8 +6,7 @@ let selectedId = null;      // the order the deliveryman clicked
 
 async function init() {
   if (!me) return;
-  $('#who').textContent = '👤 ' + me.name;
-  $('#logout').onclick = logout;
+$('#who').innerHTML = icon('user') + esc(me.name);  $('#logout').onclick = logout;
   await reload();
 }
 
@@ -58,7 +57,7 @@ function renderDetails() {
       '<li><b>Status:</b> ' + statusBadge(o.status) + '</li>' +
     '</ul>' +
     (next ? '<button class="btn primary block" id="advance">' + label + '</button>'
-          : '<div class="success-text">✔ This order has been delivered.</div>');
+          : '<div class="success-text">' + icon('check') + 'This order has been delivered.</div>');
 
   const btn = $('#advance');
   if (btn) btn.onclick = async () => {

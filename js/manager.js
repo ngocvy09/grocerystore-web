@@ -7,8 +7,7 @@ let reportFrom = '', reportTo = '';       // date range of the sales report ('' 
 
 function init() {
   if (!me) return;
-  $('#who').textContent = '👤 ' + me.name;
-  $('#logout').onclick = logout;
+$('#who').innerHTML = icon('user') + esc(me.name);  $('#logout').onclick = logout;
   $$('#tabs .tab').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
   render();
 }
@@ -230,14 +229,14 @@ function renderReport() {
         '<div class="field"><label>From</label><input id="rp-from" type="date" value="' + esc(reportFrom) + '"></div>' +
         '<div class="field"><label>To</label><input id="rp-to" type="date" value="' + esc(reportTo) + '"></div>' +
         '<button class="btn secondary" id="rp-clear">Clear dates</button>' +
-        '<button class="btn primary" id="rp-print">🖨 Print / Save as PDF</button>' +
+        '<button class="btn primary" id="rp-print">' + icon('printer') + 'Print / Save as PDF</button>' +
       '</div></div>' +
     '</div>' +
 
     // ----- the report itself (this part is what gets printed) -----
     '<div id="report-sheet">' +
       '<div class="print-only report-head">' +
-        '<div class="report-title">🛒 Grocery Store — Sales report</div>' +
+        '<div class="report-title">' + icon('cart') + 'Grocery Store — Sales report</div>' +
         '<div>Period: ' + esc(period) + '</div>' +
         '<div>Generated: ' + esc(new Date().toLocaleString()) + ' by ' + esc(me.name) + '</div>' +
       '</div>' +

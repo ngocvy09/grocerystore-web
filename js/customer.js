@@ -9,8 +9,7 @@ const cart = new Map();     // productId -> quantity
 
 async function init() {
   if (!me) return;
-  $('#who').textContent = '👤 ' + me.name;
-  $('#logout').onclick = logout;
+$('#who').innerHTML = icon('user') + esc(me.name);  $('#logout').onclick = logout;
   $('#search').addEventListener('input', e => {
     keyword = e.target.value.toLowerCase().trim();
     renderGrid();
@@ -117,8 +116,7 @@ function renderCart() {
   });
   $('#cart-rows').innerHTML = rows.length ? rows.join('') : '<div class="muted">Your cart is empty.</div>';
   $('#total').textContent = money(cartTotal());
-  $('#cart-pill').textContent = '🧺 ' + count;
-  $$('#cart-rows [data-id]').forEach(b =>
+$('#cart-count').textContent = count;  $$('#cart-rows [data-id]').forEach(b =>
     b.onclick = () => addToCart(Number(b.dataset.id), Number(b.dataset.d)));
 }
 

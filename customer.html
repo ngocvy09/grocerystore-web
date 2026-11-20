@@ -8,10 +8,8 @@
 </head>
 <body>
   <header class="app-header">
-    <div class="brand">🛒 Grocery Store</div>
-    <input class="search" id="search" type="search" placeholder="Search products...">
-    <span class="pill" id="cart-pill">🧺 0</span>
-    <span class="pill" id="who"></span>
+<div class="brand"><span data-icon="cart"></span>Grocery Store</div>    <input class="search" id="search" type="search" placeholder="Search products...">
+<span class="pill" id="cart-pill"><span data-icon="basket"></span><span id="cart-count">0</span></span>    <span class="pill" id="who"></span>
     <button class="header-btn" id="logout">Log out</button>
   </header>
 
@@ -38,8 +36,8 @@
   </main>
 
   <nav class="bottom-nav">
-    <button class="nav-item active" data-view="shop">🏪 Shop</button>
-    <button class="nav-item" data-view="orders">📦 My orders</button>
+    <button class="nav-item active" data-view="shop"><span data-icon="store"></span>Shop</button>
+    <button class="nav-item" data-view="orders"><span data-icon="package"></span>My orders</button>
   </nav>
 
   <script src="js/api.js"></script>

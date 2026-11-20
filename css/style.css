@@ -243,3 +243,13 @@ tr.row-soon { background: #ffe0b2 !important; }
   th { background: #12722b !important; color: #fff !important; }
   tbody tr:nth-child(even) { background: #f5f7f5; }
 }
+
+/* ---------- SVG icons (replace the emoji) ---------- */
+.icon {
+  width: 1.15em; height: 1.15em; flex: none;
+  vertical-align: -0.22em; margin-right: .4em;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.pill { display: inline-flex; align-items: center; }
+.nav-item { display: inline-flex; align-items: center; }
